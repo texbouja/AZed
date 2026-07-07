@@ -1,9 +1,10 @@
 # Analyse Technique : Architecture AZed (Fork Éditeur Zed)
 
-**Version :** 1.0  
+**Version :** 1.1  
 **Date :** 2026-07-07  
 **Statut :** Validé  
-**Basé sur :** [architecture-00.md](./architecture-00.md) + Retours d'expérience AZprose
+**Basé sur :** [architecture-00.md](./architecture-00.md) + Retours d'expérience AZprose  
+**Correction architecture v1.1 :** Les webviews wry sont des **fenêtres OS séparées** (pas embarquées dans GPUI).
 
 ---
 
@@ -80,99 +81,97 @@ crates/
 ## 4. Architecture Cible : Composants et Dépendances
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                        AZed (Fork Zed)                               │
-├──────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  Core (Zed inchangé ou modifié minimalement)                 │   │
-│  │  ┌────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐ │   │
-│  │  │ GPUI   │ │ Editor   │ │ Terminal │ │ Collaboration   │ │   │
-│  │  └────────┘ └──────────┘ └──────────┘ └──────────────────┘ │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                   │                                  │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  Modules AZed (nouveaux composants)                          │   │
-│  │                                                              │   │
-│  │  ┌─────────────────┐    ┌─────────────────┐                  │   │
-│  │  │  wry-webview     │    │  Configuration  │                  │   │
-│  │  │  (composant GPU  │◄──►│  Graphique       │                  │   │
-│  │  │   pour HTML/JS) │    │  (panneau de     │                  │   │
-│  │  └──────┬──────────┘    │   réglages)     │                  │   │
-│  │         │               └─────────────────┘                  │   │
-│  │         ▼                                                    │   │
-│  │  ┌──────────────────────────────────────────┐                │   │
-│  │  │  Preview HTML (wry + KaTeX)               │                │   │
-│  │  │  Viewer PDF  (wry + PDF.js)               │                │   │
-│  │  └──────────────────────────────────────────┘                │   │
-│  │                                                              │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐                    │   │
-│  │  │ Mksman   │ │ Tinymist │ │ TeXlab   │ ← LSPs              │   │
-│  │  │ (Markdwn)│ │ (Typst)  │ │ (LaTeX)  │   (sidecar ou       │   │
-│  │  └──────────┘ └──────────┘ └──────────┘    embeddé Rust)    │   │
-│  │                                                              │   │
-│  │  ┌──────────────────────────────────────────┐                │   │
-│  │  │  Module Configuration Projet              │                │   │
-│  │  │  (dossier .azed/ à la racine du projet,  │                │   │
-│  │  │   like Obsidian vaults)                  │                │   │
-│  │  └──────────────────────────────────────────┘                │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  Services externes (sidecars)                                │   │
-│  │  ┌──────────────────┐  ┌──────────────────┐                  │   │
-│  │  │  Indexation/     │  │  OpenCode        │                  │   │
-│  │  │  Recherche       │  │  (IA/MCP)        │                  │   │
-│  │  └──────────────────┘  └──────────────────┘                  │   │
-│  └──────────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                        AZed Process                           │
+│                                                                │
+│  ┌──────────── EPIU ───────────┐  ┌─────── wry ────────┐     │
+│  │  Fenêtre GPUI #1            │  │  Fenêtre Webview   │     │
+│  │  ┌── Workspace ────────┐    │  │  (projet #1)       │     │
+│  │  │  Editor .md         │    │  │  ┌── Preview ────┐ │     │
+│  │  │  Editor .tex        │◄──►│  │  │ KaTeX/HTML   │ │     │
+│  │  │  Editor .typ        │ IPC │  │  │ PDF.js       │ │     │
+│  │  └─────────────────────┘    │  │  │ SVG Typst    │ │     │
+│  └─────────────────────────────┘  │  └───────────────┘ │     │
+│                                   └─────────────────────┘     │
+│                                                                │
+│  ┌──────────── EPIU ───────────┐  ┌─────── wry ────────┐     │
+│  │  Fenêtre GPUI #2            │  │  Fenêtre Webview   │     │
+│  │  ┌── Workspace ────────┐    │  │  (projet #2)       │     │
+│  │  │  Editor .tex        │◄──►│  │  ┌── Preview ────┐ │     │
+│  │  │  Editor .typ        │ IPC │  │  │ PDF.js       │ │     │
+│  │  └─────────────────────┘    │  │  │ SVG Typst    │ │     │
+│  └─────────────────────────────┘  │  └───────────────┘ │     │
+│                                   └─────────────────────┘     │
+│                                                                │
+│  ┌────────────────────────────────────────────────────────┐   │
+│  │  LSPs (processus séparés)                              │   │
+│  │  marksman ── tinymist ── texlab ── latexmk             │   │
+│  └────────────────────────────────────────────────────────┘   │
+│                                                                │
+│  ┌────────────────────────────────────────────────────────┐   │
+│  │  Services futurs (sidecars)                            │   │
+│  │  Indexation/Recherche ── OpenCode (IA/MCP)             │   │
+│  └────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ### 4.1 Ordre d'intégration (par dépendance)
 
 ```
-Phase 1 : wry-webview (fondation)
-  └─► Phase 2 : Preview HTML + KaTeX
-      └─► Phase 3 : Viewer PDF
-          └─► Phase 4 : LSPs (marksman, tinymist, texlab)
-              └─► Phase 5 : Configuration graphique
-                  └─► Phase 6 : Configuration projet (.azed/)
-                      └─► Phase 7 (future) : Indexation, OpenCode
+Phase 1 : Fenêtres webview wry (fondation)
+  │
+  ├── (parallèle possible)
+  │
+  ├─► Phase 2 : Preview HTML + KaTeX
+  ├─► Phase 3 : Viewer PDF + Synctex
+  ├─► Phase 4 : Preview SVG Typst
+  │
+  └─► Phase 5 : LSPs (marksman, tinymist, texlab)
+      └─► Phase 6 : Configuration graphique
+          └─► Phase 7 : Configuration projet (.azed/)
+              └─► Phase 8 (future) : Indexation, OpenCode
 ```
 
 ---
 
 ## 5. Analyse Technique par Composant
 
-### 5.1 Composant wry-webview (Phase 1)
+### 5.1 Fenêtres Webview (Phase 1)
 
-**Problème :** GPUI ne permet pas d'afficher du HTML/JS/CSS complet.  
-**Solution :** Intégrer `wry` (la webview utilisée par Tauri) comme un élément GPUI personnalisé.  
-**Précédent :** AZprose utilise déjà wry via Tauri (son backend de rendu natif). Le pattern est validé.
+**Problème :** GPUI ne permet pas d'afficher du HTML/JS/CSS complet. Impossible d'embarquer une webview dans le rendu natif GPUI (Metal/OpenGL).  
+**Solution :** Ouvrir des **fenêtres OS séparées** avec `wry` pour le contenu web. Pas d'intégration dans GPUI.  
+**Précédent :** AZprose utilise Tauri/wry exactement comme ça — fenêtre webview séparée pour chaque preview. VS Code fait pareil.
 
-**Approche d'intégration :** Créer une crate `gpui_wry` ou intégrer directement dans `gpui::platform` :
-- Sur macOS : `WKWebView`
-- Sur Linux : `webkit2gtk`
-- Sur Windows : `WebView2`
+**Architecture :** Chaque workspace AZed possède une `HashMap<ViewId, wry::WebView>` — des fenêtres web indépendantes, une par preview ouverte (HTML, PDF, SVG). La communication se fait via `wry::WebView::evaluate_script()` et `WebViewBuilder::with_ipc_handler()`.
 
 ```rust
-// Concept : Élément GPUI encapsulant une webview wry
-struct WebViewElement {
+// Fenêtre webview wry standalone, associée à un workspace
+struct PreviewWindow {
     webview: wry::WebView,
-    bounds: Bounds,
+    workspace_id: WorkspaceId,
 }
 
-impl Element for WebViewElement {
-    fn render(&mut self, cx: &mut RenderContext) {
-        // Redimensionner la webview pour correspondre au bounds GPUI
-        self.webview.set_bounds(self.bounds);
+impl PreviewWindow {
+    /// Envoyer du contenu HTML/JS vers la webview
+    fn load_html(&self, html: &str) {
+        self.webview.load_html(html);
+    }
+
+    /// Exécuter du JS côté webview (ex: PDF.scrollToPage)
+    fn eval(&self, js: &str) {
+        self.webview.evaluate_script(js);
+    }
+
+    /// Recevoir un message de la webview (ex: clic → Synctex)
+    fn on_message(&self, msg: &str) {
+        // msg = "synctex:12:5" → déplacer curseur éditeur
     }
 }
 ```
 
 **Risques :** 
-- Synchronisation des cycles de vie GPUI/wry (redimensionnement, focus)
-- Gestion des entrées clavier entre GPUI et la webview
+- Gestion du cycle de vie : fermer la webview quand le workspace se ferme
+- Synchronisation des positions de fenêtre (placer la webview à côté de GPUI)
 - Performances sur Windows (WebView2 peut être lent au démarrage)
 
 ### 5.2 Preview HTML + KaTeX (Phase 2)
@@ -387,21 +386,22 @@ Si un jour le projet doit diverger au point de ne plus supporter les extensions 
 
 ### Modifications du noyau nécessaires
 
-1. **GPUI** : Ajout du support wry (élément webview personnalisé)
-2. **Languages** : Remplacement du LSP Markdown par défaut
-3. **Workspace** : Ajout du système de panneaux configurables
+1. **Aucune modification de GPUI** — les webviews sont des fenêtres OS séparées, pas des éléments GPUI
+2. **Workspace** : Ajouter la gestion des fenêtres webview (création/suppression liée au cycle de vie du workspace)
+3. **Languages** : Remplacement du LSP Markdown par défaut
 4. **Settings** : Ajout du module de configuration graphique
 
 ### Crates à créer
 
 | Crate | Description | Dépend de |
 |-------|-------------|-----------|
-| `gpui_wry` | Intégration wry comme élément GPUI | gpui, wry |
-| `markdown_preview_az` | Preview scientifique (KaTeX) | markdown_preview, gpui_wry |
-| `pdf_viewer` | Viewer PDF avec PDF.js | gpui_wry, synctex |
+| `az_wry` | Gestionnaire de fenêtres webview wry | wry |
+| `markdown_preview_az` | Preview scientifique (KaTeX) via wry | markdown_preview, az_wry |
+| `pdf_viewer` | Viewer PDF avec PDF.js via wry | az_wry, synctex |
 | `synctex` | Parsing Synctex | — |
-| `settings_ui` | Interface de config graphique | gpui_wry |
-| `project_config` | Gestion configuration projet | — |
+| `typst_preview` | Preview SVG Typst via tinymist | az_wry |
+| `settings_ui` | Interface de config graphique via wry | az_wry |
+| `project_config` | Gestion configuration projet (.azed/) | — |
 | `az_core` | Orchestrateur des modules AZed | tout ce qui précède |
 
 ### Crates à modifier
@@ -411,7 +411,7 @@ Si un jour le projet doit diverger au point de ne plus supporter les extensions 
 | `paths/src/paths.rs` | **Aucune** — on garde `APP_NAME = "Zed"` pour la compatibilité |
 | `languages/src/markdown.rs` | Remplacer LSP par marksman |
 | `settings/src/default_settings.json` | Ajouter les entrées marksman, tinymist, texlab |
-| `workspace/src/workspace.rs` | Ajouter les panneaux configurables |
+| `workspace/src/workspace.rs` | Ajouter la gestion des fenêtres webview |
 | `lsp/src/lsp_adapter.rs` | Adapter pour tinymist preview |
 
 ---
@@ -420,14 +420,16 @@ Si un jour le projet doit diverger au point de ne plus supporter les extensions 
 
 L'architecture proposée est réalisable. Les points critiques sont :
 
-1. **L'intégration wry/GPUI** est le fondement dont tout dépend — c'est la première étape et la plus risquée. Tauri a déjà résolu ce problème au niveau de son framework ; AZed doit le résoudre au niveau GPUI.
+1. **Les fenêtres wry** sont le fondement — mais contrairement à la version 1.0, on ne touche pas à GPUI. wry s'utilise en fenêtre OS indépendante, ce qui est son cas d'usage natif. C'est simple, robuste, et déjà prouvé par Tauri.
 
-2. **Les LSPs** (marksman, tinymist, texlab) s'intègrent via le protocole LSP standard. Aucune modification majeure du noyau n'est nécessaire pour les faire fonctionner.
+2. **L'IPC entre GPUI et wry** est le point technique clé : `evaluate_script()` + `ipc_handler()` de wry. C'est standard, bien documenté, déjà fonctionnel dans AZprose.
 
-3. **PDF.js + Synctex** est un problème déjà résolu par de nombreux projets (LaTeX-Workshop, AZprose). Le port en Rust est direct.
+3. **Les LSPs** (marksman, tinymist, texlab) s'intègrent via le protocole LSP standard. Aucune modification majeure du noyau n'est nécessaire.
 
-4. **La configuration graphique** est le composant le plus indépendant — peut être développé en parallèle.
+4. **PDF.js + Synctex** est un problème déjà résolu (LaTeX-Workshop, AZprose). Le port en Rust est direct.
 
-5. **Le risque principal** n'est pas technique mais stratégique : la divergence avec le upstream Zed. Des merges réguliers et une isolation des modifications dans des crates séparées sont essentiels.
+5. **Le multi-session** est natif dans Zed : chaque fenêtre = workspace indépendant. Les webviews sont attachées à leur workspace. Aucun risque d'interférence.
 
-**Recommandation :** Procéder par phases (1→6) avec validation fonctionnelle à chaque étape avant de passer à la suivante.
+6. **Le risque principal** n'est pas technique mais stratégique : la divergence avec le upstream Zed. Des merges réguliers et une isolation des modifications dans des crates séparées sont essentiels.
+
+**Recommandation :** Phase 1 (wry standalone) immédiatement, puis Phases 2-4 en parallèle.

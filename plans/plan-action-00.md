@@ -1,8 +1,9 @@
 # Plan d'Action AZed — Implémentation par Phases
 
-**Version :** 1.0  
+**Version :** 1.1  
 **Date :** 2026-07-07  
-**Basé sur :** [architecture-00.md](./architecture-00.md), [analyse-technique-00.md](./analyse-technique-00.md)
+**Basé sur :** [architecture-00.md](./architecture-00.md), [analyse-technique-00.md](./analyse-technique-00.md)  
+**Correction v1.1 :** Webviews wry en fenêtres OS séparées, pas d'embedding GPUI.
 
 ---
 
@@ -10,28 +11,27 @@
 
 ```
 AZed/
-├── .github/              # CI/CD, templates
 ├── assets/
 │   ├── binaries/         # Binaires sidecar (marksman, tinymist, texlab)
 │   ├── katex/            # Fichiers KaTeX (CSS, JS)
 │   └── pdfjs/            # Fichiers PDF.js
 ├── crates/
-│   ├── gpui/             # [MODIFIÉ] Ajout support wry
-│   ├── gpui_wry/         # [NOUVEAU] Élément webview GPUI
+│   ├── gpui/             # [INCHANGÉ]
 │   ├── editor/           # [INCHANGÉ]
 │   ├── project/          # [INCHANGÉ]
-│   ├── workspace/        # [MODIFIÉ] Panneaux configurables
+│   ├── workspace/        # [MODIFIÉ] Gestion fenêtres webview
 │   ├── languages/        # [MODIFIÉ] LSP par défaut
 │   ├── lsp/              # [MODIFIÉ] Support tinymist preview
+│   ├── az_wry/           # [NOUVEAU] Gestionnaire fenêtres wry
 │   ├── markdown_preview/ # [MODIFIÉ] Pipeline KaTeX
-│   ├── pdf_viewer/       # [NOUVEAU] Viewer PDF.js
+│   ├── pdf_viewer/       # [NOUVEAU] Viewer PDF.js + Synctex
 │   ├── synctex/          # [NOUVEAU] Parsing Synctex
+│   ├── typst_preview/    # [NOUVEAU] Preview SVG tinymist
 │   ├── settings_ui/      # [NOUVEAU] Interface config graphique
 │   ├── project_config/   # [NOUVEAU] Config projet (.azed/)
 │   └── az_core/          # [NOUVEAU] Orchestrateur AZed
 ├── extensions/           # Extensions WASM (futur)
 ├── docs/                 # Documentation
-├── plugins/              # Sidecars (tinymist preview...)
 └── plans/                # Documents d'architecture
 ```
 
@@ -65,38 +65,37 @@ AZed/
 
 ---
 
-## Phase 1 : Intégration wry/GPUI (Fondation WebView)
+## Phase 1 : Fenêtres Webview wry (Fondation)
 
-**Durée estimée :** 2-3 semaines  
-**Priorité :** CRITIQUE (prérequis pour les phases 2, 3, 5)  
+**Durée estimée :** 2 semaines  
+**Priorité :** CRITIQUE (prérequis pour les phases 2, 3, 4)  
 **Dépendances :** Phase 0
 
 ### Description
-Ajouter une webview wry comme élément GPUI personnalisé. C'est le fondement de tout le rendu HTML (preview, PDF, configuration).
+Créer la fondation : ouvrir des fenêtres OS séparées avec `wry` pour le rendu HTML/JS/CSS. Chaque preview (KaTeX, PDF.js, SVG Typst) sera une fenêtre wry attachée à un workspace. **GPUI n'est pas modifié.**
 
 ### Étapes
 
 | # | Tâche | Détails | Fichiers |
 |---|-------|---------|----------|
-| 1.1 | **Étudier l'architecture GPUI** | Comprendre le système d'éléments, le rendu, les handlers d'événements | `crates/gpui/src/elements/` |
-| 1.2 | **Créer la crate `gpui_wry`** | Nouvelle crate avec dépendance wry | `crates/gpui_wry/Cargo.toml` |
-| 1.3 | **Implémenter `WebViewElement`** | Struct GPUI `Element` encapsulant wry | `crates/gpui_wry/src/webview_element.rs` |
-| 1.4 | **Platform backends** | Implémenter pour chaque OS | `crates/gpui_wry/src/platform/` |
-| 1.5 | **Gestion du redimensionnement** | Synchroniser les bounds GPUI avec wry | `crates/gpui_wry/src/webview_element.rs` |
-| 1.6 | **Focus et entrées clavier** | Router les events GPUI vers wry | `crates/gpui_wry/src/webview_element.rs` |
-| 1.7 | **Test : page HTML statique** | Afficher "Hello AZed" dans une webview embarquée | Test d'intégration |
-| 1.8 | **Test : communication JS↔Rust** | Pont IPC bidirectionnel (évaluer JS, recevoir callbacks) | `crates/gpui_wry/src/rpc.rs` |
+| 1.1 | **Créer la crate `az_wry`** | Dépendance wry + wrapper simple | `crates/az_wry/Cargo.toml` |
+| 1.2 | **`PreviewWindow` struct** | Fenêtre wry standalone (titre, taille, position) | `crates/az_wry/src/preview_window.rs` |
+| 1.3 | **IPC : Rust → Webview** | `evaluate_script()` pour envoyer données | `crates/az_wry/src/ipc.rs` |
+| 1.4 | **IPC : Webview → Rust** | `ipc_handler` pour recevoir events | `crates/az_wry/src/ipc.rs` |
+| 1.5 | **Intégration workspace** | Créer/supprimer une webview quand un workspace s'ouvre/se ferme | `crates/workspace/src/workspace.rs` |
+| 1.6 | **Test : afficher "Hello AZed"** | Fenêtre wry avec titre "AZed Preview" | Test manuel |
+| 1.7 | **Test : IPC roundtrip** | Webview envoie "ping" → Rust répond "pong" | `crates/az_wry/tests/` |
+| 1.8 | **Positionnement fenêtre** | Placer la preview à côté de la fenêtre GPUI | `crates/az_wry/src/preview_window.rs` |
 
 ### Validation
-- Une webview s'affiche correctement dans un panneau GPUI
-- Le redimensionnement fonctionne
-- Les events clavier sont routés correctement
-- `wry::WebView::evaluate_script()` et messages IPC fonctionnent
+- Une fenêtre webview s'ouvre à côté de l'éditeur
+- `evaluate_script("hello()")` fonctionne
+- `ipc_handler` reçoit les messages JS
+- La fenêtre se ferme quand le workspace se ferme
+- Fenêtre fonctionnelle sur Linux (webkit2gtk) et macOS (WKWebView)
 
-### Risques
-- **macOS WKWebView** : intégration serrée avec NSView,可能需要 ajustements
-- **Linux webkit2gtk** : version système requise ≥ 2.36
-- **Redimensionnement** : wry ne supporte pas nativement le redimensionnement fluide
+### Multi-session
+Chaque workspace possède sa propre `Vec<PreviewWindow>`. Deux projets ouverts = deux groupes de fenêtres indépendants. Aucun état partagé.
 
 ---
 
@@ -265,42 +264,42 @@ Le système `.azprose/` est fonctionnel et testé. Reprendre le pattern :
 ## Résumé des Durées et Dépendances
 
 ```
-Phase 0 : Fork + Rebranding         [2-3 jours]
+Phase 0 : Fork + Rebranding                  [terminé]
     │
     ▼
-Phase 1 : wry/GPUI (fondation)     [2-3 semaines] ◄─── Dépend de Phase 0
+Phase 1 : Fenêtres webview wry (fondation)  [2 semaines]  ─── Dépend de Phase 0
     │
-    ├──────────────────┐
-    ▼                  ▼
-Phase 2 : Preview      Phase 3 : Viewer PDF    [3-5 semaines] ◄─── Dépendent de Phase 1
-Markdown + KaTeX       + Synctex
-    │                  │
-    ├──────────────────┘
-    ▼
-Phase 4 : LSPs (marksman, tinymist, texlab)  [3-4 semaines] ◄─── Dépend de Phase 0
-    │
-    ▼
-Phase 5 : Configuration graphique   [3-4 semaines] ◄─── Dépend de Phase 1
+    ├───────────┬───────────┐
+    ▼           ▼           ▼
+Phase 2 :      Phase 3 :   Phase 4 :        [2-4 semaines chacune]
+Preview HTML   Viewer PDF  Preview SVG       ─── Dépendent de Phase 1
+KaTeX          + Synctex   Typst/tinymist    ─── EN PARALLÈLE
+    │           │           │
+    └───────────┼───────────┘
+                ▼
+Phase 5 : LSPs (marksman, tinymist, texlab) [3-4 semaines] ◄─── Dépend de Phase 0
     │
     ▼
-Phase 6 : Configuration projet      [2-3 semaines] ◄─── Dépend de Phase 5
+Phase 6 : Configuration graphique           [3-4 semaines] ◄─── Dépend de Phase 1
     │
     ▼
-Phase 7 : Fonctionnalités futures   [continu]
+Phase 7 : Configuration projet (.azed/)     [2-3 semaines] ◄─── Dépend de Phase 6
+    │
+    ▼
+Phase 8 : Fonctionnalités futures           [continu]
 
-Total estimé phases 0-6 : ~18-25 semaines (4-6 mois)
+Total estimé phases 1-7 : ~16-22 semaines (4-5 mois)
 ```
 
-Les phases 2 et 3 peuvent être développées en parallèle après la Phase 1.
-Les phases 5 et 6 sont les moins urgentes et peuvent être reportées si nécessaire.
+Les phases 2, 3 et 4 peuvent être développées en parallèle après la Phase 1.
+Les phases 6 et 7 sont les moins urgentes et peuvent être reportées si nécessaire.
 
 ---
 
 ## Recommandation de Démarrage Immédiat
 
-1. **Fork Zed maintenant** (Phase 0) — cela débloque l'exploration du code et les premiers tests
-2. **Commencer l'exploration GPUI** en parallèle — lire le code des éléments, comprendre le système de rendu
-3. **Prototyper une webview wry standalone** hors de Zed pour valider l'approche d'intégration
-4. **Phase 1 (wry/GPUI)** est le chemin critique — tout dépend de sa réussite
+1. **Phase 0 terminée** — fork + rebranding OK
+2. **Phase 1 : fenêtres wry** — le socle de tout le reste. Objectif : une fenêtre webview qui s'ouvre, affiche du HTML, et communique avec l'éditeur en Rust
+3. **Phase 1 ne touche pas à GPUI** — wry s'utilise en fenêtre OS native, aucune modification du moteur de rendu
 
-La plus grande leçon d'AZprose est que l'architecture modulaire doit être pensée dès le départ, pas ajoutée après. Chaque nouveau composant doit suivre le pattern `ModuleRegistry` sans compromis.
+La plus grande leçon d'AZprose est que l'architecture modulaire doit être pensée dès le départ. Chaque nouveau composant doit suivre le pattern `ModuleRegistry` sans compromis.
